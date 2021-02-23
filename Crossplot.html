@@ -1,0 +1,282 @@
+﻿<!DOCTYPE html>
+
+<head>
+  <meta charset="utf-8" />
+  <title>Crossplot</title>
+  <script src="./assets/webgl-fmi.js"></script>
+  <script src="./assets/shaders.js"></script>
+  <link rel="stylesheet" type="text/css" href="./assets/Style.css" />
+
+  <script>
+    function start() {
+      var canvas = document.getElementById("crossplot");
+      canvas.addEventListener(
+        "webglcontextlost",
+        function (event) {
+          event.preventDefault();
+        },
+        false
+      );
+      canvas.addEventListener("webglcontextrestored", init, false);
+
+      canvas.addEventListener("mousemove", mouseMove, false);
+      canvas.addEventListener("mousedown", mouseDown, false);
+      canvas.addEventListener("mouseup", mouseUp, false);
+      window.addEventListener("keydown", keyPressed, false);
+
+      // изключване на контекстното меню
+      canvas.addEventListener(
+        "contextmenu",
+        function (e) {
+          e.preventDefault();
+        },
+        false
+      );
+
+      init();
+      drawFrame();
+    }
+
+    function init() {
+      gl = getContext("crossplot");
+      glprog = getProgram(vShader, fShader);
+      getVariables();
+
+      gl.enable(gl.DEPTH_TEST);
+      gl.clearColor(245 / 255, 241 / 255, 241 / 255, 1);
+
+      identity();
+      var proj = orthoMatrix(gl.canvas.width, gl.canvas.height, -1000, 1000);
+      gl.uniformMatrix4fv(uProjectionMatrix, false, proj);
+
+      //координатна система
+      coord = new CoordinateSystem(-235, 235, -280, 280);
+
+      //координатна мрежа
+      grid = new Grid();
+
+      //букви
+      letX = new Letter([240, -20, 0], "X");
+      letY = new Letter([-20, 285, 0], "Y");
+      letT1 = new Letter([-240, -20, 0], "T");
+      letT2 = new Letter([-20, -285, 0], "T");
+
+      //контролни точки
+      controlPointsXY = [];
+      controlPointsXT = [];
+      controlPointsYT = [];
+    }
+    
+    function XT(conPointsXY) {
+      var result = [];
+      var size = conPointsXY.length;
+      var y = 20;
+      var step = 260;
+      if (size > 1) step = 260 / (size - 1);
+      for (var i = 0; i < size; i++) {
+        result.push(new Circle(conPointsXY[i].center[0], -y - i * step));
+        result[i].color = [0.98,0.46,0.05]; //orange
+        // result[i].color = [1, 0.64, 0.37]; //pretty orange
+      }
+      return result;
+    }
+    
+    function YT(conPointsXY) {
+      var result = [];
+      var size = conPointsXY.length;
+      var x = 20;
+      var step = 220;
+      if (size > 1) step = 220 / (size - 1);
+      for (var i = 0; i < size; i++) {
+        result.push(new Circle(-x - i * step, conPointsXY[i].center[1]));
+        result[i].color = [0.97, 0.72, 0.2];
+      }
+      return result;
+    }
+    
+    var draw = false;
+    var addGrid = false;
+    var drawContour = true;
+    var selected = -1;
+    var points = 0;
+
+    function changeLanguage() {
+      var instructions = document.getElementById('ins').src;
+      instructions = instructions.substring(instructions.length-6, instructions.length);
+
+      if (instructions === "EN.png") document.getElementById('ins').src = "assets\\instructions-BG.png";
+      else document.getElementById('ins').src = "assets\\instructions-EN.png";
+    }
+    
+    function getSelectedPoint(x, y) {
+      var sizeXY = controlPointsXY.length;
+      for (var i = 0; i < sizeXY; i++) {
+        if (
+          Math.sqrt( Math.pow(controlPointsXY[i].center[0] - x, 2) + Math.pow(controlPointsXY[i].center[1] - y, 2) ) <= 5.5
+        )
+          return i;
+        if (
+          Math.sqrt( Math.pow(controlPointsXT[i].center[0] - x, 2) + Math.pow(controlPointsXT[i].center[1] - y, 2) ) <= 5.5
+        )
+          return i;
+        if (
+          Math.sqrt( Math.pow(controlPointsYT[i].center[0] - x, 2) + Math.pow(controlPointsYT[i].center[1] - y, 2) ) <= 5.5
+        )
+          return i;
+      }
+      return -1;
+    }
+
+    // при натискане на бутон
+    function mouseDown(event) {
+      if (draw) return;
+
+      if (event.button != 0) return;
+      
+      var x = getX(event);
+      var y = getY(event);
+      selected = getSelectedPoint(x, y);
+
+      if (selected == -1) {
+        if (x > 10 && x < 250 && y > 10 && y < 290) {
+          controlPointsXY.push(new Circle(x, y));
+          controlPointsXY[controlPointsXY.length - 1].color = [0.71, 0.37, 0.4];
+          draw = true;
+          mouseMove(event);
+        }
+      } 
+      else {
+        draw = true;
+        mouseMove(event);
+      }
+    }
+
+    // при движение на мишката
+    function mouseMove(event) {
+      if (!draw) return;
+
+      var x = getX(event);
+      var y = getY(event);
+      
+      if (x > 10 && x < 250 && y > 10 && y < 290 && selected == -1) {
+        controlPointsXY[controlPointsXY.length - 1].center = [x, y, 0];
+        requestAnimationFrame(drawFrame);
+      } 
+      else if (selected != -1 && x > 10 && x < 250 && y > 10 && y < 290) { //I квадрант
+        controlPointsXY[selected].center = [x, y, 0];
+        requestAnimationFrame(drawFrame);
+      }
+      else if (selected != -1 && x > 10 && x < 250 && y > -280 && y < -20) { //IV квадрант
+        controlPointsXY[selected].center = [x, controlPointsXY[selected].center[1], 0];
+        requestAnimationFrame(drawFrame);
+      }
+      else if (selected != -1 && y > 10 && y < 290) { //II квадрант
+        controlPointsXY[selected].center = [controlPointsXY[selected].center[0], y, 0];
+        requestAnimationFrame(drawFrame);
+      }
+    }
+
+    function mouseUp(event) {
+      if (!draw) return;
+
+      var x = getX(event);
+      var y = getY(event);
+      
+      if (event.button == 0 && selected != -1 && x > 10 && x < 250 && y > 10 && y < 290 ) { //I квадрант
+        controlPointsXY[selected].center = [x, y, 0];
+        selected = -1;
+        requestAnimationFrame(drawFrame);
+      }
+      else if (event.button == 0 && selected != -1 && x > 10 && x < 250 && y > -280 && y < -20) { //IV квадрант
+        controlPointsXY[selected].center = [x, controlPointsXY[selected].center[1], 0];
+        selected = -1;
+        requestAnimationFrame(drawFrame);
+      }
+      else if (event.button == 0 && selected != -1 && y > 10 && y < 290) { //II квадрант
+        controlPointsXY[selected].center = [controlPointsXY[selected].center[0], y, 0];
+        selected = -1;
+        requestAnimationFrame(drawFrame);
+      }
+
+      draw = false;
+    }
+
+    function keyPressed(event) {
+      if (event.keyCode == 71) {                  //"G" за рисуване/махане на координатна мрежа
+        if (addGrid) addGrid = false;
+        else addGrid = true;
+        requestAnimationFrame(drawFrame);
+      } 
+      else if (event.keyCode == 82) {             //"R" за махане на последната добавена точка
+        controlPointsXY.pop();
+        requestAnimationFrame(drawFrame);
+      }
+      else if (event.keyCode == 68) {             //"D" за изтриване на всичко
+        controlPointsXY = [];
+        requestAnimationFrame(drawFrame);
+      }
+      else if (event.keyCode == 67) {             //"C" за рисуване/махане на контура на кривите на Безие
+        if (drawContour) drawContour = false;
+        else drawContour = true;
+        requestAnimationFrame(drawFrame);
+      }
+    }
+
+    function drawFrame() {
+      gl.clear(gl.COLOR_BUFFER_BIT + gl.DEPTH_BUFFER_BIT);
+      lookAt([0, 0, 50], [0, 0, 0], [0, 1, 0]);
+      
+      controlPointsXT = XT(controlPointsXY);
+      controlPointsYT = YT(controlPointsXY);
+      
+      //рисуване на контролните точки
+      if (drawContour) {
+        for (var i = 0; i < controlPointsXY.length; i++) {
+          controlPointsXY[i].draw();
+          controlPointsXT[i].draw();
+          controlPointsYT[i].draw();
+        }
+      }
+
+      //рисуване на кривите на Безие
+      bezierXY = new BezierCurve(controlPointsXY, drawContour);
+      bezierXT = new BezierCurve(controlPointsXT, drawContour);
+      bezierYT = new BezierCurve(controlPointsYT, drawContour);
+      bezierXY.draw();
+      bezierXT.draw();
+      bezierYT.draw();
+
+      //рисуване на координатната система
+      coord.draw();
+      
+      //рисуване на буквите
+      letX.draw();
+      letY.draw();
+      letT1.draw();
+      letT2.draw();
+
+      //рисуване на координатната мрежа
+      if (addGrid) grid.draw();
+    }
+  </script>
+</head>
+
+<body onload="start()" style="background-color: rgb(224, 214, 205)">
+  <!-- (228, 223, 217); -->
+  <noscript> Искаме JavaScript, но няма! </noscript>
+
+  <canvas id = "crossplot" width="516" height="610">
+    Искаме canvas, но няма!
+  </canvas> 
+  <img src = "assets\instructions-EN.png" width = "330" height = "350" onclick = "changeLanguage()" id = "ins">
+</body>
+
+<!-- 
+        INSTRUCTIONS
+    press G - add grid
+    press R - Remove last added point
+    press D - Delete all points 
+    press C - on/off draw contour
+    left-click - add point
+    left-click on point + moving cursor = dragging the point
+ -->
