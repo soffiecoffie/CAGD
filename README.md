@@ -1,1 +1,1 @@
-# CAGD project Crossplot
+# CAGD project Crossplot using WebGL
